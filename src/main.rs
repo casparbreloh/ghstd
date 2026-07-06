@@ -25,9 +25,6 @@ enum Cmd {
     Apply {
         /// Repository as OWNER/REPO. Defaults to the current repository.
         repo: Option<String>,
-        /// Apply to all non-archived repositories for the authenticated user.
-        #[arg(long)]
-        all: bool,
     },
     /// Create a repo and apply the standard
     Create {
@@ -50,14 +47,69 @@ struct Repo {
     allow_merge_commit: bool,
     allow_rebase_merge: bool,
     allow_auto_merge: bool,
+    allow_update_branch: bool,
+    has_issues: bool,
+    has_projects: bool,
+    has_wiki: bool,
+    has_discussions: bool,
 }
 
 #[derive(Debug, Deserialize)]
-struct ListedRepo {
+struct GraphQlResponse {
+    data: GraphQlData,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphQlData {
+    viewer: Viewer,
+}
+
+#[derive(Debug, Deserialize)]
+struct Viewer {
+    repositories: RepositoryConnection,
+}
+
+#[derive(Debug, Deserialize)]
+struct RepositoryConnection {
+    nodes: Vec<GraphQlRepo>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct PageInfo {
+    #[serde(rename = "hasNextPage")]
+    has_next_page: bool,
+    #[serde(rename = "endCursor")]
+    end_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphQlRepo {
     #[serde(rename = "nameWithOwner")]
     name_with_owner: String,
     #[serde(rename = "isArchived")]
     is_archived: bool,
+    #[serde(rename = "deleteBranchOnMerge")]
+    delete_branch_on_merge: bool,
+    #[serde(rename = "squashMergeAllowed")]
+    squash_merge_allowed: bool,
+    #[serde(rename = "mergeCommitAllowed")]
+    merge_commit_allowed: bool,
+    #[serde(rename = "rebaseMergeAllowed")]
+    rebase_merge_allowed: bool,
+    #[serde(rename = "autoMergeAllowed")]
+    auto_merge_allowed: bool,
+    #[serde(rename = "allowUpdateBranch")]
+    allow_update_branch: bool,
+    #[serde(rename = "hasIssuesEnabled")]
+    has_issues_enabled: bool,
+    #[serde(rename = "hasProjectsEnabled")]
+    has_projects_enabled: bool,
+    #[serde(rename = "hasWikiEnabled")]
+    has_wiki_enabled: bool,
+    #[serde(rename = "hasDiscussionsEnabled")]
+    has_discussions_enabled: bool,
 }
 
 #[derive(Debug)]
@@ -72,13 +124,16 @@ struct Rule {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Status { repo, all } => {
-            let repos = resolve_repos(repo, all)?;
-            status(repos)
+            if all {
+                if repo.is_some() {
+                    bail!("pass either a repo or --all, not both");
+                }
+                status_all(all_repos()?)
+            } else {
+                status_one(&repo.unwrap_or(current_repo()?))
+            }
         }
-        Cmd::Apply { repo, all } => {
-            let repos = resolve_repos(repo, all)?;
-            apply(repos)
-        }
+        Cmd::Apply { repo } => apply(&repo.unwrap_or(current_repo()?)),
         Cmd::Create {
             name,
             public,
@@ -87,23 +142,26 @@ fn main() -> Result<()> {
     }
 }
 
-fn status(repos: Vec<String>) -> Result<()> {
-    if repos.len() == 1 {
-        let repo = get_repo(&repos[0])?;
-        print_repo_status(&repo);
-        return Ok(());
-    }
+fn status_one(repo_name: &str) -> Result<()> {
+    let repo = get_repo(repo_name)?;
+    print_repo_status(&repo);
+    Ok(())
+}
 
+fn status_all(repos: Vec<Repo>) -> Result<()> {
     let mut drifted = 0;
-    let width = repos.iter().map(String::len).max().unwrap_or(0);
-    for repo_name in repos {
-        let repo = get_repo(&repo_name)?;
+    let width = repos
+        .iter()
+        .map(|repo| repo.full_name.len())
+        .max()
+        .unwrap_or(0);
+    for repo in repos {
         let drift = drift(&repo).len();
         if drift == 0 {
-            println!("{repo_name:<width$}  ok");
+            println!("{:<width$}  ok", repo.full_name);
         } else {
             drifted += 1;
-            println!("{repo_name:<width$}  {drift} drift");
+            println!("{:<width$}  {drift} drift", repo.full_name);
         }
     }
     println!();
@@ -111,37 +169,24 @@ fn status(repos: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn apply(repos: Vec<String>) -> Result<()> {
-    if repos.len() == 1 {
-        apply_one(&repos[0], true)?;
-        return Ok(());
-    }
-
-    let mut changed = 0;
-    let width = repos.iter().map(String::len).max().unwrap_or(0);
-    for repo in repos {
-        let changes = apply_one(&repo, false)?;
-        if changes == 0 {
-            println!("{repo:<width$}  ok");
-        } else {
-            changed += 1;
-            println!("{repo:<width$}  {changes} change");
+fn apply(repo_name: &str) -> Result<()> {
+    let (full_name, changes) = apply_standard(repo_name)?;
+    println!("{full_name}");
+    if changes.is_empty() {
+        println!("  ok");
+    } else {
+        for rule in &changes {
+            println!("  {}", changed_text(rule));
         }
     }
-    println!();
-    println!("{changed} changed");
     Ok(())
 }
 
-fn apply_one(repo_name: &str, detailed: bool) -> Result<usize> {
+fn apply_standard(repo_name: &str) -> Result<(String, Vec<Rule>)> {
     let repo = get_repo(repo_name)?;
     let changes = drift(&repo);
     if changes.is_empty() {
-        if detailed {
-            println!("{}", repo.full_name);
-            println!("  ok");
-        }
-        return Ok(0);
+        return Ok((repo.full_name, changes));
     }
 
     let output = Command::new("gh")
@@ -154,19 +199,17 @@ fn apply_one(repo_name: &str, detailed: bool) -> Result<usize> {
             "--enable-merge-commit=false",
             "--enable-rebase-merge=false",
             "--enable-auto-merge",
+            "--allow-update-branch",
+            "--enable-issues=false",
+            "--enable-projects=false",
+            "--enable-wiki=false",
+            "--enable-discussions=false",
         ])
         .output()
         .with_context(|| format!("failed to run gh repo edit for {}", repo.full_name))?;
     ensure_success(output, &format!("gh repo edit {}", repo.full_name))?;
 
-    if detailed {
-        println!("{}", repo.full_name);
-        for rule in &changes {
-            println!("  {}", changed_text(rule));
-        }
-    }
-
-    Ok(changes.len())
+    Ok((repo.full_name, changes))
 }
 
 fn create(name: String, public: bool) -> Result<()> {
@@ -180,40 +223,72 @@ fn create(name: String, public: bool) -> Result<()> {
 
     println!("{repo}");
     println!("  created");
-    let changes = apply_one(&repo, false)?;
-    if changes == 0 {
+    let (_, changes) = apply_standard(&repo)?;
+    if changes.is_empty() {
         println!("  ok");
     } else {
-        println!("  applied {changes} change");
+        for rule in &changes {
+            println!("  {}", changed_text(rule));
+        }
     }
     Ok(())
 }
 
-fn resolve_repos(repo: Option<String>, all: bool) -> Result<Vec<String>> {
-    match (repo, all) {
-        (Some(repo), false) => Ok(vec![repo]),
-        (None, false) => Ok(vec![current_repo()?]),
-        (None, true) => all_repos(),
-        (Some(_), true) => bail!("pass either a repo or --all, not both"),
+fn all_repos() -> Result<Vec<Repo>> {
+    let mut repos = Vec::new();
+    let mut cursor = None;
+    loop {
+        let after = cursor
+            .as_ref()
+            .map(|cursor| format!(", after: \"{cursor}\""))
+            .unwrap_or_default();
+        let query = format!(
+            r#"query {{
+  viewer {{
+    repositories(first: 100{after}, ownerAffiliations: OWNER, isFork: false) {{
+      nodes {{
+        nameWithOwner
+        isArchived
+        deleteBranchOnMerge
+        squashMergeAllowed
+        mergeCommitAllowed
+        rebaseMergeAllowed
+        autoMergeAllowed
+        allowUpdateBranch
+        hasIssuesEnabled
+        hasProjectsEnabled
+        hasWikiEnabled
+        hasDiscussionsEnabled
+      }}
+      pageInfo {{
+        hasNextPage
+        endCursor
+      }}
+    }}
+  }}
+}}"#
+        );
+        let response: GraphQlResponse = serde_json::from_str(&gh_json(&[
+            "api",
+            "graphql",
+            "-f",
+            &format!("query={query}"),
+        ])?)
+        .context("failed to parse repository GraphQL response")?;
+        let connection = response.data.viewer.repositories;
+        repos.extend(
+            connection
+                .nodes
+                .into_iter()
+                .filter(|repo| !repo.is_archived)
+                .map(Repo::from),
+        );
+        if !connection.page_info.has_next_page {
+            break;
+        }
+        cursor = connection.page_info.end_cursor;
     }
-}
-
-fn all_repos() -> Result<Vec<String>> {
-    let user = gh_json(&["api", "user", "--jq", ".login"])?;
-    let repos: Vec<ListedRepo> = serde_json::from_str(&gh_json(&[
-        "repo",
-        "list",
-        user.trim(),
-        "--limit",
-        "1000",
-        "--json",
-        "nameWithOwner,isArchived",
-    ])?)?;
-    Ok(repos
-        .into_iter()
-        .filter(|repo| !repo.is_archived)
-        .map(|repo| repo.name_with_owner)
-        .collect())
+    Ok(repos)
 }
 
 fn current_repo() -> Result<String> {
@@ -305,7 +380,60 @@ fn rules(repo: &Repo) -> Vec<Rule> {
             enabled_text: "auto-merge enabled",
             disabled_text: "auto-merge disabled",
         },
+        Rule {
+            label: "update branch suggestions",
+            current: repo.allow_update_branch,
+            desired: true,
+            enabled_text: "update branch suggestions enabled",
+            disabled_text: "update branch suggestions disabled",
+        },
+        Rule {
+            label: "issues",
+            current: repo.has_issues,
+            desired: false,
+            enabled_text: "issues enabled",
+            disabled_text: "issues disabled",
+        },
+        Rule {
+            label: "projects",
+            current: repo.has_projects,
+            desired: false,
+            enabled_text: "projects enabled",
+            disabled_text: "projects disabled",
+        },
+        Rule {
+            label: "wiki",
+            current: repo.has_wiki,
+            desired: false,
+            enabled_text: "wiki enabled",
+            disabled_text: "wiki disabled",
+        },
+        Rule {
+            label: "discussions",
+            current: repo.has_discussions,
+            desired: false,
+            enabled_text: "discussions enabled",
+            disabled_text: "discussions disabled",
+        },
     ]
+}
+
+impl From<GraphQlRepo> for Repo {
+    fn from(repo: GraphQlRepo) -> Self {
+        Self {
+            full_name: repo.name_with_owner,
+            delete_branch_on_merge: repo.delete_branch_on_merge,
+            allow_squash_merge: repo.squash_merge_allowed,
+            allow_merge_commit: repo.merge_commit_allowed,
+            allow_rebase_merge: repo.rebase_merge_allowed,
+            allow_auto_merge: repo.auto_merge_allowed,
+            allow_update_branch: repo.allow_update_branch,
+            has_issues: repo.has_issues_enabled,
+            has_projects: repo.has_projects_enabled,
+            has_wiki: repo.has_wiki_enabled,
+            has_discussions: repo.has_discussions_enabled,
+        }
+    }
 }
 
 fn current_text(rule: &Rule) -> &'static str {
