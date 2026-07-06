@@ -14,6 +14,14 @@ pub struct Rule {
     disabled_text: &'static str,
 }
 
+struct RuleSpec {
+    label: &'static str,
+    enable_flag: &'static str,
+    disable_flag: &'static str,
+    enabled_text: &'static str,
+    disabled_text: &'static str,
+}
+
 pub fn drift(repo: &Repo, config: &Config) -> Vec<Rule> {
     rules(repo, config)
         .into_iter()
@@ -27,127 +35,138 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
     push_rule(
         &mut rules,
         settings.delete_branch_on_merge,
-        "delete branches on merge",
         repo.delete_branch_on_merge,
-        "--delete-branch-on-merge",
-        "--delete-branch-on-merge=false",
-        "delete branches on merge",
-        "keep branches after merge",
+        RuleSpec {
+            label: "delete branches on merge",
+            enable_flag: "--delete-branch-on-merge",
+            disable_flag: "--delete-branch-on-merge=false",
+            enabled_text: "delete branches on merge",
+            disabled_text: "keep branches after merge",
+        },
     );
     push_rule(
         &mut rules,
         settings.squash_merge,
-        "squash merge",
         repo.allow_squash_merge,
-        "--enable-squash-merge",
-        "--enable-squash-merge=false",
-        "squash merge enabled",
-        "squash merge disabled",
+        RuleSpec {
+            label: "squash merge",
+            enable_flag: "--enable-squash-merge",
+            disable_flag: "--enable-squash-merge=false",
+            enabled_text: "squash merge enabled",
+            disabled_text: "squash merge disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.merge_commit,
-        "merge commits",
         repo.allow_merge_commit,
-        "--enable-merge-commit",
-        "--enable-merge-commit=false",
-        "merge commits enabled",
-        "merge commits disabled",
+        RuleSpec {
+            label: "merge commits",
+            enable_flag: "--enable-merge-commit",
+            disable_flag: "--enable-merge-commit=false",
+            enabled_text: "merge commits enabled",
+            disabled_text: "merge commits disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.rebase_merge,
-        "rebase merge",
         repo.allow_rebase_merge,
-        "--enable-rebase-merge",
-        "--enable-rebase-merge=false",
-        "rebase merge enabled",
-        "rebase merge disabled",
+        RuleSpec {
+            label: "rebase merge",
+            enable_flag: "--enable-rebase-merge",
+            disable_flag: "--enable-rebase-merge=false",
+            enabled_text: "rebase merge enabled",
+            disabled_text: "rebase merge disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.auto_merge,
-        "auto-merge",
         repo.allow_auto_merge,
-        "--enable-auto-merge",
-        "--enable-auto-merge=false",
-        "auto-merge enabled",
-        "auto-merge disabled",
+        RuleSpec {
+            label: "auto-merge",
+            enable_flag: "--enable-auto-merge",
+            disable_flag: "--enable-auto-merge=false",
+            enabled_text: "auto-merge enabled",
+            disabled_text: "auto-merge disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.update_branch,
-        "update branch suggestions",
         repo.allow_update_branch,
-        "--allow-update-branch",
-        "--allow-update-branch=false",
-        "update branch suggestions enabled",
-        "update branch suggestions disabled",
+        RuleSpec {
+            label: "update branch suggestions",
+            enable_flag: "--allow-update-branch",
+            disable_flag: "--allow-update-branch=false",
+            enabled_text: "update branch suggestions enabled",
+            disabled_text: "update branch suggestions disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.issues,
-        "issues",
         repo.has_issues,
-        "--enable-issues",
-        "--enable-issues=false",
-        "issues enabled",
-        "issues disabled",
+        RuleSpec {
+            label: "issues",
+            enable_flag: "--enable-issues",
+            disable_flag: "--enable-issues=false",
+            enabled_text: "issues enabled",
+            disabled_text: "issues disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.projects,
-        "projects",
         repo.has_projects,
-        "--enable-projects",
-        "--enable-projects=false",
-        "projects enabled",
-        "projects disabled",
+        RuleSpec {
+            label: "projects",
+            enable_flag: "--enable-projects",
+            disable_flag: "--enable-projects=false",
+            enabled_text: "projects enabled",
+            disabled_text: "projects disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.wiki,
-        "wiki",
         repo.has_wiki,
-        "--enable-wiki",
-        "--enable-wiki=false",
-        "wiki enabled",
-        "wiki disabled",
+        RuleSpec {
+            label: "wiki",
+            enable_flag: "--enable-wiki",
+            disable_flag: "--enable-wiki=false",
+            enabled_text: "wiki enabled",
+            disabled_text: "wiki disabled",
+        },
     );
     push_rule(
         &mut rules,
         settings.discussions,
-        "discussions",
         repo.has_discussions,
-        "--enable-discussions",
-        "--enable-discussions=false",
-        "discussions enabled",
-        "discussions disabled",
+        RuleSpec {
+            label: "discussions",
+            enable_flag: "--enable-discussions",
+            disable_flag: "--enable-discussions=false",
+            enabled_text: "discussions enabled",
+            disabled_text: "discussions disabled",
+        },
     );
     rules
 }
 
-fn push_rule(
-    rules: &mut Vec<Rule>,
-    desired: Option<bool>,
-    label: &'static str,
-    current: bool,
-    enable_flag: &'static str,
-    disable_flag: &'static str,
-    enabled_text: &'static str,
-    disabled_text: &'static str,
-) {
+fn push_rule(rules: &mut Vec<Rule>, desired: Option<bool>, current: bool, spec: RuleSpec) {
     let Some(desired) = desired else {
         return;
     };
     rules.push(Rule {
-        label,
+        label: spec.label,
         current,
         desired,
-        enable_flag,
-        disable_flag,
-        enabled_text,
-        disabled_text,
+        enable_flag: spec.enable_flag,
+        disable_flag: spec.disable_flag,
+        enabled_text: spec.enabled_text,
+        disabled_text: spec.disabled_text,
     });
 }
 
@@ -164,6 +183,10 @@ fn settings_for(repo: &Repo, config: &Config) -> Settings {
         settings.merge(public);
     }
     settings
+}
+
+pub fn has_rules(repo: &Repo, config: &Config) -> bool {
+    settings_for(repo, config).has_rules()
 }
 
 impl Rule {

@@ -45,6 +45,19 @@ fn path() -> PathBuf {
 }
 
 impl Settings {
+    pub fn has_rules(&self) -> bool {
+        self.delete_branch_on_merge.is_some()
+            || self.squash_merge.is_some()
+            || self.merge_commit.is_some()
+            || self.rebase_merge.is_some()
+            || self.auto_merge.is_some()
+            || self.update_branch.is_some()
+            || self.issues.is_some()
+            || self.projects.is_some()
+            || self.wiki.is_some()
+            || self.discussions.is_some()
+    }
+
     pub fn merge(&mut self, other: &Settings) {
         if other.delete_branch_on_merge.is_some() {
             self.delete_branch_on_merge = other.delete_branch_on_merge;

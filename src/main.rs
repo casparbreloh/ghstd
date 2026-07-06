@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use crate::{
     config::Config,
     github::Repo,
-    standard::{Rule, drift, rules},
+    standard::{Rule, drift, has_rules, rules},
 };
 
 #[derive(Parser)]
@@ -47,8 +47,9 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
+    let cli = Cli::parse();
     let config = config::load()?;
-    match Cli::parse().cmd {
+    match cli.cmd {
         Cmd::Status { repo, all } => {
             if all {
                 if repo.is_some() {
@@ -71,6 +72,11 @@ fn status_one(repo_name: &str, config: &Config) -> Result<()> {
 }
 
 fn status_all(repos: Vec<Repo>, config: &Config) -> Result<()> {
+    if repos.iter().all(|repo| !has_rules(repo, config)) {
+        println!("no rules configured");
+        return Ok(());
+    }
+
     let mut drifted = 0;
     let width = repos
         .iter()
@@ -92,7 +98,14 @@ fn status_all(repos: Vec<Repo>, config: &Config) -> Result<()> {
 }
 
 fn apply(repo_name: &str, config: &Config) -> Result<()> {
-    let (full_name, changes) = apply_standard(repo_name, config)?;
+    let repo = github::get_repo(repo_name)?;
+    if !has_rules(&repo, config) {
+        println!("{}", repo.full_name);
+        println!("  no rules configured");
+        return Ok(());
+    }
+
+    let (full_name, changes) = apply_standard(repo, config)?;
     print_changes(&full_name, &changes);
     Ok(())
 }
@@ -103,7 +116,8 @@ fn create(name: String, public: bool, config: &Config) -> Result<()> {
 
     println!("{repo}");
     println!("  created");
-    let (_, changes) = apply_standard(&repo, config)?;
+    let repo = github::get_repo(&repo)?;
+    let (_, changes) = apply_standard(repo, config)?;
     if changes.is_empty() {
         println!("  ok");
     } else {
@@ -114,8 +128,7 @@ fn create(name: String, public: bool, config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn apply_standard(repo_name: &str, config: &Config) -> Result<(String, Vec<Rule>)> {
-    let repo = github::get_repo(repo_name)?;
+fn apply_standard(repo: Repo, config: &Config) -> Result<(String, Vec<Rule>)> {
     let changes = drift(&repo, config);
     if changes.is_empty() {
         return Ok((repo.full_name, changes));
@@ -128,6 +141,11 @@ fn apply_standard(repo_name: &str, config: &Config) -> Result<(String, Vec<Rule>
 
 fn print_repo_status(repo: &Repo, config: &Config) {
     println!("{}", repo.full_name);
+    if !has_rules(repo, config) {
+        println!("  no rules configured");
+        return;
+    }
+
     let changes = drift(repo, config);
     if changes.is_empty() {
         println!("  ok");
