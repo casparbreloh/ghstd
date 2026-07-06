@@ -10,6 +10,8 @@ ghstd apply --all
 ghstd create my-repo --private
 ```
 
+`--all` scans non-archived repositories owned by the authenticated GitHub user.
+
 The standard is intentionally small:
 
 - delete branches on merge

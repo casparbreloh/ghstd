@@ -156,8 +156,8 @@ fn apply_one(repo_name: &str, detailed: bool) -> Result<usize> {
             "--enable-auto-merge",
         ])
         .output()
-        .context("failed to run gh repo edit")?;
-    ensure_success(output)?;
+        .with_context(|| format!("failed to run gh repo edit for {}", repo.full_name))?;
+    ensure_success(output, &format!("gh repo edit {}", repo.full_name))?;
 
     if detailed {
         println!("{}", repo.full_name);
@@ -175,8 +175,8 @@ fn create(name: String, public: bool) -> Result<()> {
     let output = Command::new("gh")
         .args(["repo", "create", &repo, visibility])
         .output()
-        .context("failed to run gh repo create")?;
-    ensure_success(output)?;
+        .with_context(|| format!("failed to run gh repo create {repo}"))?;
+    ensure_success(output, &format!("gh repo create {repo}"))?;
 
     println!("{repo}");
     println!("  created");
@@ -199,8 +199,8 @@ fn resolve_repos(repo: Option<String>, all: bool) -> Result<Vec<String>> {
 }
 
 fn all_repos() -> Result<Vec<String>> {
-    let user = gh_json(["api", "user", "--jq", ".login"])?;
-    let repos: Vec<ListedRepo> = serde_json::from_str(&gh_json([
+    let user = gh_json(&["api", "user", "--jq", ".login"])?;
+    let repos: Vec<ListedRepo> = serde_json::from_str(&gh_json(&[
         "repo",
         "list",
         user.trim(),
@@ -217,7 +217,7 @@ fn all_repos() -> Result<Vec<String>> {
 }
 
 fn current_repo() -> Result<String> {
-    Ok(gh_json([
+    Ok(gh_json(&[
         "repo",
         "view",
         "--json",
@@ -230,7 +230,7 @@ fn current_repo() -> Result<String> {
 }
 
 fn get_repo(repo: &str) -> Result<Repo> {
-    serde_json::from_str(&gh_json(["api", &format!("repos/{repo}")])?)
+    serde_json::from_str(&gh_json(&["api", &format!("repos/{repo}")])?)
         .with_context(|| format!("failed to parse repo settings for {repo}"))
 }
 
@@ -238,7 +238,7 @@ fn normalize_repo_name(name: &str) -> Result<String> {
     if name.contains('/') {
         return Ok(name.to_string());
     }
-    let user = gh_json(["api", "user", "--jq", ".login"])?;
+    let user = gh_json(&["api", "user", "--jq", ".login"])?;
     Ok(format!("{}/{}", user.trim(), name))
 }
 
@@ -321,20 +321,24 @@ fn changed_text(rule: &Rule) -> String {
     format!("{} {state}", rule.label)
 }
 
-fn gh_json<const N: usize>(args: [&str; N]) -> Result<String> {
+fn gh_json(args: &[&str]) -> Result<String> {
     let output = Command::new("gh")
         .args(args)
         .output()
-        .context("failed to run gh")?;
-    ensure_success(output)
+        .with_context(|| format!("failed to run gh {}", args.join(" ")))?;
+    ensure_success(output, &format!("gh {}", args.join(" ")))
 }
 
-fn ensure_success(output: std::process::Output) -> Result<String> {
+fn ensure_success(output: std::process::Output, command: &str) -> Result<String> {
     if output.status.success() {
         return String::from_utf8(output.stdout).context("gh output was not utf-8");
     }
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let message = if stderr.is_empty() { stdout } else { stderr };
-    Err(anyhow!(message))
+    if message.is_empty() {
+        Err(anyhow!("{command} failed with {}", output.status))
+    } else {
+        Err(anyhow!("{command} failed: {message}"))
+    }
 }
