@@ -30,24 +30,24 @@ Example:
 
 ```toml
 [standard]
-delete_branch_on_merge = true
-squash_merge = true
-merge_commit = false
-rebase_merge = false
 auto_merge = true
+delete_branch_on_merge = true
+discussions = false
+issues = false
+merge_commit = false
+projects = false
+rebase_merge = false
+squash_merge = true
+squash_merge_message = "PR_BODY"
+squash_merge_title = "PR_TITLE"
 update_branch = true
+wiki = false
 
 [private]
-issues = false
-projects = false
-wiki = false
-discussions = false
+discussions = true
 
 [public]
 issues = true
-projects = false
-wiki = false
-discussions = false
 ```
 
 `[standard]` applies to every repository. `[private]` and `[public]` override
@@ -55,16 +55,18 @@ only the settings they specify. Omitted settings are ignored.
 
 Supported settings:
 
-- `delete_branch_on_merge`
-- `squash_merge`
-- `merge_commit`
-- `rebase_merge`
 - `auto_merge`
-- `update_branch`
-- `issues`
-- `projects`
-- `wiki`
+- `delete_branch_on_merge`
 - `discussions`
+- `issues`
+- `merge_commit`
+- `projects`
+- `rebase_merge`
+- `squash_merge`
+- `squash_merge_message`
+- `squash_merge_title`
+- `update_branch`
+- `wiki`
 
 `status --all` scans non-archived repositories owned by the authenticated
 GitHub user.

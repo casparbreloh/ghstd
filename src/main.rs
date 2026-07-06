@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use crate::{
     config::Config,
     github::Repo,
-    standard::{Rule, drift, has_rules, rules},
+    standard::{Edit, Rule, drift, has_rules, rules},
 };
 
 #[derive(Parser)]
@@ -134,8 +134,20 @@ fn apply_standard(repo: Repo, config: &Config) -> Result<(String, Vec<Rule>)> {
         return Ok((repo.full_name, changes));
     }
 
-    let flags = changes.iter().map(Rule::flag).collect::<Vec<_>>();
-    github::edit_repo(&repo.full_name, &flags)?;
+    let mut flags = Vec::new();
+    let mut fields = Vec::new();
+    for change in &changes {
+        match change.edit() {
+            Edit::Flag(flag) => flags.push(flag.clone()),
+            Edit::Patch { field, value } => fields.push((field.clone(), value.clone())),
+        }
+    }
+    if !flags.is_empty() {
+        github::edit_repo(&repo.full_name, &flags)?;
+    }
+    if !fields.is_empty() {
+        github::patch_repo(&repo.full_name, &fields)?;
+    }
     Ok((repo.full_name, changes))
 }
 

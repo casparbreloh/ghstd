@@ -17,6 +17,8 @@ pub struct Repo {
     pub has_projects: bool,
     pub has_wiki: bool,
     pub has_discussions: bool,
+    pub squash_merge_commit_message: String,
+    pub squash_merge_commit_title: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +79,10 @@ struct GraphQlRepo {
     has_wiki_enabled: bool,
     #[serde(rename = "hasDiscussionsEnabled")]
     has_discussions_enabled: bool,
+    #[serde(rename = "squashMergeCommitMessage")]
+    squash_merge_commit_message: String,
+    #[serde(rename = "squashMergeCommitTitle")]
+    squash_merge_commit_title: String,
 }
 
 pub fn current_repo() -> Result<String> {
@@ -123,6 +129,8 @@ pub fn all_repos() -> Result<Vec<Repo>> {
         hasProjectsEnabled
         hasWikiEnabled
         hasDiscussionsEnabled
+        squashMergeCommitMessage
+        squashMergeCommitTitle
       }}
       pageInfo {{
         hasNextPage
@@ -180,6 +188,25 @@ pub fn edit_repo(repo: &str, flags: &[String]) -> Result<()> {
     Ok(())
 }
 
+pub fn patch_repo(repo: &str, fields: &[(String, String)]) -> Result<()> {
+    let mut args = vec![
+        "api".to_string(),
+        "--method".to_string(),
+        "PATCH".to_string(),
+        format!("repos/{repo}"),
+    ];
+    for (field, value) in fields {
+        args.push("-f".to_string());
+        args.push(format!("{field}={value}"));
+    }
+    let output = Command::new("gh")
+        .args(&args)
+        .output()
+        .with_context(|| format!("failed to run gh api PATCH repos/{repo}"))?;
+    ensure_success(output, &format!("gh api PATCH repos/{repo}"))?;
+    Ok(())
+}
+
 fn json(args: &[&str]) -> Result<String> {
     let output = Command::new("gh")
         .args(args)
@@ -217,6 +244,8 @@ impl From<GraphQlRepo> for Repo {
             has_projects: repo.has_projects_enabled,
             has_wiki: repo.has_wiki_enabled,
             has_discussions: repo.has_discussions_enabled,
+            squash_merge_commit_message: repo.squash_merge_commit_message,
+            squash_merge_commit_title: repo.squash_merge_commit_title,
         }
     }
 }

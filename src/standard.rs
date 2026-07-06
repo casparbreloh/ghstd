@@ -5,27 +5,28 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Rule {
-    label: &'static str,
-    current: bool,
-    desired: bool,
+    current_text: String,
+    desired_text: String,
+    edit: Edit,
+}
+
+struct RuleSpec {
     enable_flag: &'static str,
     disable_flag: &'static str,
     enabled_text: &'static str,
     disabled_text: &'static str,
 }
 
-struct RuleSpec {
-    label: &'static str,
-    enable_flag: &'static str,
-    disable_flag: &'static str,
-    enabled_text: &'static str,
-    disabled_text: &'static str,
+#[derive(Debug)]
+pub enum Edit {
+    Flag(String),
+    Patch { field: String, value: String },
 }
 
 pub fn drift(repo: &Repo, config: &Config) -> Vec<Rule> {
     rules(repo, config)
         .into_iter()
-        .filter(|rule| rule.current != rule.desired)
+        .filter(|rule| !rule.matches())
         .collect()
 }
 
@@ -37,7 +38,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.delete_branch_on_merge,
         repo.delete_branch_on_merge,
         RuleSpec {
-            label: "delete branches on merge",
             enable_flag: "--delete-branch-on-merge",
             disable_flag: "--delete-branch-on-merge=false",
             enabled_text: "delete branches on merge",
@@ -49,7 +49,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.squash_merge,
         repo.allow_squash_merge,
         RuleSpec {
-            label: "squash merge",
             enable_flag: "--enable-squash-merge",
             disable_flag: "--enable-squash-merge=false",
             enabled_text: "squash merge enabled",
@@ -61,7 +60,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.merge_commit,
         repo.allow_merge_commit,
         RuleSpec {
-            label: "merge commits",
             enable_flag: "--enable-merge-commit",
             disable_flag: "--enable-merge-commit=false",
             enabled_text: "merge commits enabled",
@@ -73,7 +71,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.rebase_merge,
         repo.allow_rebase_merge,
         RuleSpec {
-            label: "rebase merge",
             enable_flag: "--enable-rebase-merge",
             disable_flag: "--enable-rebase-merge=false",
             enabled_text: "rebase merge enabled",
@@ -85,7 +82,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.auto_merge,
         repo.allow_auto_merge,
         RuleSpec {
-            label: "auto-merge",
             enable_flag: "--enable-auto-merge",
             disable_flag: "--enable-auto-merge=false",
             enabled_text: "auto-merge enabled",
@@ -97,7 +93,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.update_branch,
         repo.allow_update_branch,
         RuleSpec {
-            label: "update branch suggestions",
             enable_flag: "--allow-update-branch",
             disable_flag: "--allow-update-branch=false",
             enabled_text: "update branch suggestions enabled",
@@ -109,7 +104,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.issues,
         repo.has_issues,
         RuleSpec {
-            label: "issues",
             enable_flag: "--enable-issues",
             disable_flag: "--enable-issues=false",
             enabled_text: "issues enabled",
@@ -121,7 +115,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.projects,
         repo.has_projects,
         RuleSpec {
-            label: "projects",
             enable_flag: "--enable-projects",
             disable_flag: "--enable-projects=false",
             enabled_text: "projects enabled",
@@ -133,7 +126,6 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.wiki,
         repo.has_wiki,
         RuleSpec {
-            label: "wiki",
             enable_flag: "--enable-wiki",
             disable_flag: "--enable-wiki=false",
             enabled_text: "wiki enabled",
@@ -145,12 +137,25 @@ pub fn rules(repo: &Repo, config: &Config) -> Vec<Rule> {
         settings.discussions,
         repo.has_discussions,
         RuleSpec {
-            label: "discussions",
             enable_flag: "--enable-discussions",
             disable_flag: "--enable-discussions=false",
             enabled_text: "discussions enabled",
             disabled_text: "discussions disabled",
         },
+    );
+    push_text_rule(
+        &mut rules,
+        settings.squash_merge_message,
+        &repo.squash_merge_commit_message,
+        "squash merge message",
+        "squash_merge_commit_message",
+    );
+    push_text_rule(
+        &mut rules,
+        settings.squash_merge_title,
+        &repo.squash_merge_commit_title,
+        "squash merge title",
+        "squash_merge_commit_title",
     );
     rules
 }
@@ -160,13 +165,41 @@ fn push_rule(rules: &mut Vec<Rule>, desired: Option<bool>, current: bool, spec: 
         return;
     };
     rules.push(Rule {
-        label: spec.label,
-        current,
-        desired,
-        enable_flag: spec.enable_flag,
-        disable_flag: spec.disable_flag,
-        enabled_text: spec.enabled_text,
-        disabled_text: spec.disabled_text,
+        current_text: if current {
+            spec.enabled_text.to_string()
+        } else {
+            spec.disabled_text.to_string()
+        },
+        desired_text: if desired {
+            spec.enabled_text.to_string()
+        } else {
+            spec.disabled_text.to_string()
+        },
+        edit: Edit::Flag(if desired {
+            spec.enable_flag.to_string()
+        } else {
+            spec.disable_flag.to_string()
+        }),
+    });
+}
+
+fn push_text_rule(
+    rules: &mut Vec<Rule>,
+    desired: Option<String>,
+    current: &str,
+    label: &'static str,
+    field: &'static str,
+) {
+    let Some(desired) = desired else {
+        return;
+    };
+    rules.push(Rule {
+        current_text: format!("{label} {current}"),
+        desired_text: format!("{label} {desired}"),
+        edit: Edit::Patch {
+            field: field.to_string(),
+            value: desired,
+        },
     });
 }
 
@@ -190,28 +223,19 @@ pub fn has_rules(repo: &Repo, config: &Config) -> bool {
 }
 
 impl Rule {
-    pub fn current_text(&self) -> &'static str {
-        if self.current {
-            self.enabled_text
-        } else {
-            self.disabled_text
-        }
+    pub fn current_text(&self) -> &str {
+        &self.current_text
     }
 
     pub fn changed_text(&self) -> String {
-        let state = if self.desired { "enabled" } else { "disabled" };
-        format!("{} {state}", self.label)
-    }
-
-    pub fn flag(&self) -> String {
-        if self.desired {
-            self.enable_flag.to_string()
-        } else {
-            self.disable_flag.to_string()
-        }
+        self.desired_text.clone()
     }
 
     pub fn matches(&self) -> bool {
-        self.current == self.desired
+        self.current_text == self.desired_text
+    }
+
+    pub fn edit(&self) -> &Edit {
+        &self.edit
     }
 }
