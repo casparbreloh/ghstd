@@ -3,7 +3,7 @@ mod github;
 mod standard;
 
 use anyhow::{Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::{
     config::Config,
@@ -14,6 +14,10 @@ use crate::{
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
 struct Cli {
+    /// Emit the CLI's usage specification.
+    #[arg(long, hide = true)]
+    usage_spec: bool,
+
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -47,6 +51,13 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
+    if std::env::args_os().len() == 2
+        && std::env::args_os().nth(1).as_deref() == Some("--usage-spec".as_ref())
+    {
+        clap_usage::generate(&mut Cli::command(), "ghstd", &mut std::io::stdout());
+        return Ok(());
+    }
+
     let cli = Cli::parse();
     let config = config::load()?;
     match cli.cmd {

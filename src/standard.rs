@@ -227,8 +227,8 @@ impl Rule {
         &self.current_text
     }
 
-    pub fn changed_text(&self) -> String {
-        self.desired_text.clone()
+    pub fn changed_text(&self) -> &str {
+        &self.desired_text
     }
 
     pub fn matches(&self) -> bool {
