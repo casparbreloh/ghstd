@@ -8,7 +8,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use crate::{
     config::Config,
     github::Repo,
-    standard::{Edit, Rule, drift, has_rules, rules},
+    standard::{Edit, Rule, drift, has_rules},
 };
 
 #[derive(Parser)]
@@ -68,56 +68,46 @@ fn main() -> Result<()> {
                 }
                 status_all(github::all_repos()?, &config)
             } else {
-                status_one(&repo.unwrap_or(github::current_repo()?), &config)
+                status_one(&repo_or_current(repo)?, &config)
             }
         }
-        Cmd::Apply { repo } => apply(&repo.unwrap_or(github::current_repo()?), &config),
+        Cmd::Apply { repo } => apply(&repo_or_current(repo)?, &config),
         Cmd::Create { name, public, .. } => create(name, public, &config),
     }
 }
 
+fn repo_or_current(repo: Option<String>) -> Result<String> {
+    repo.map_or_else(github::current_repo, Ok)
+}
+
 fn status_one(repo_name: &str, config: &Config) -> Result<()> {
     let repo = github::get_repo(repo_name)?;
-    print_repo_status(&repo, config);
+    println!("{}  {}", repo.full_name, repo_status(&repo, config));
     Ok(())
 }
 
 fn status_all(repos: Vec<Repo>, config: &Config) -> Result<()> {
-    if repos.iter().all(|repo| !has_rules(repo, config)) {
-        println!("no rules configured");
-        return Ok(());
-    }
-
-    let mut drifted = 0;
     let width = repos
         .iter()
         .map(|repo| repo.full_name.len())
         .max()
         .unwrap_or(0);
     for repo in repos {
-        let drift = drift(&repo, config).len();
-        if drift == 0 {
-            println!("{:<width$}  ok", repo.full_name);
-        } else {
-            drifted += 1;
-            println!("{:<width$}  {drift} drift", repo.full_name);
-        }
+        println!("{:<width$}  {}", repo.full_name, repo_status(&repo, config));
     }
-    println!();
-    println!("{drifted} drift");
     Ok(())
 }
 
 fn apply(repo_name: &str, config: &Config) -> Result<()> {
     let repo = github::get_repo(repo_name)?;
     if !has_rules(&repo, config) {
-        println!("{}", repo.full_name);
-        println!("  no rules configured");
+        println!("{}  no rules", repo.full_name);
         return Ok(());
     }
 
     let (full_name, changes) = apply_standard(repo, config)?;
-    print_changes(&full_name, &changes);
+    let result = if changes.is_empty() { "ok" } else { "applied" };
+    println!("{full_name}  {result}");
     Ok(())
 }
 
@@ -125,17 +115,10 @@ fn create(name: String, public: bool, config: &Config) -> Result<()> {
     let repo = github::normalize_repo_name(&name)?;
     github::create_repo(&repo, public)?;
 
-    println!("{repo}");
-    println!("  created");
     let repo = github::get_repo(&repo)?;
-    let (_, changes) = apply_standard(repo, config)?;
-    if changes.is_empty() {
-        println!("  ok");
-    } else {
-        for rule in &changes {
-            println!("  {}", rule.changed_text());
-        }
-    }
+    let full_name = repo.full_name.clone();
+    apply_standard(repo, config)?;
+    println!("{full_name}  created");
     Ok(())
 }
 
@@ -162,33 +145,13 @@ fn apply_standard(repo: Repo, config: &Config) -> Result<(String, Vec<Rule>)> {
     Ok((repo.full_name, changes))
 }
 
-fn print_repo_status(repo: &Repo, config: &Config) {
-    println!("{}", repo.full_name);
+fn repo_status(repo: &Repo, config: &Config) -> String {
     if !has_rules(repo, config) {
-        println!("  no rules configured");
-        return;
+        return "no rules".to_string();
     }
 
-    let changes = drift(repo, config);
-    if changes.is_empty() {
-        println!("  ok");
-        return;
-    }
-    for rule in rules(repo, config) {
-        let state = if rule.matches() { "ok" } else { "drift" };
-        println!("  {state:<5} {}", rule.current_text());
-    }
-    println!();
-    println!("{} drift", changes.len());
-}
-
-fn print_changes(full_name: &str, changes: &[Rule]) {
-    println!("{full_name}");
-    if changes.is_empty() {
-        println!("  ok");
-    } else {
-        for rule in changes {
-            println!("  {}", rule.changed_text());
-        }
+    match drift(repo, config).len() {
+        0 => "ok".to_string(),
+        count => format!("{count} drift"),
     }
 }

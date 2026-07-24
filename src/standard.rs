@@ -223,14 +223,6 @@ pub fn has_rules(repo: &Repo, config: &Config) -> bool {
 }
 
 impl Rule {
-    pub fn current_text(&self) -> &str {
-        &self.current_text
-    }
-
-    pub fn changed_text(&self) -> &str {
-        &self.desired_text
-    }
-
     pub fn matches(&self) -> bool {
         self.current_text == self.desired_text
     }
