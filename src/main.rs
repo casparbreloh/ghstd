@@ -82,7 +82,7 @@ fn repo_or_current(repo: Option<String>) -> Result<String> {
 
 fn status_one(repo_name: &str, config: &Config) -> Result<()> {
     let repo = github::get_repo(repo_name)?;
-    println!("{}  {}", repo.full_name, repo_status(&repo, config));
+    println!("{}", repo_status(&repo, config));
     Ok(())
 }
 
@@ -101,13 +101,13 @@ fn status_all(repos: Vec<Repo>, config: &Config) -> Result<()> {
 fn apply(repo_name: &str, config: &Config) -> Result<()> {
     let repo = github::get_repo(repo_name)?;
     if !has_rules(&repo, config) {
-        println!("{}  no rules", repo.full_name);
+        println!("no rules");
         return Ok(());
     }
 
-    let (full_name, changes) = apply_standard(repo, config)?;
+    let changes = apply_standard(repo, config)?;
     let result = if changes.is_empty() { "ok" } else { "applied" };
-    println!("{full_name}  {result}");
+    println!("{result}");
     Ok(())
 }
 
@@ -116,16 +116,15 @@ fn create(name: String, public: bool, config: &Config) -> Result<()> {
     github::create_repo(&repo, public)?;
 
     let repo = github::get_repo(&repo)?;
-    let full_name = repo.full_name.clone();
     apply_standard(repo, config)?;
-    println!("{full_name}  created");
+    println!("created");
     Ok(())
 }
 
-fn apply_standard(repo: Repo, config: &Config) -> Result<(String, Vec<Rule>)> {
+fn apply_standard(repo: Repo, config: &Config) -> Result<Vec<Rule>> {
     let changes = drift(&repo, config);
     if changes.is_empty() {
-        return Ok((repo.full_name, changes));
+        return Ok(changes);
     }
 
     let mut flags = Vec::new();
@@ -142,7 +141,7 @@ fn apply_standard(repo: Repo, config: &Config) -> Result<(String, Vec<Rule>)> {
     if !fields.is_empty() {
         github::patch_repo(&repo.full_name, &fields)?;
     }
-    Ok((repo.full_name, changes))
+    Ok(changes)
 }
 
 fn repo_status(repo: &Repo, config: &Config) -> String {
